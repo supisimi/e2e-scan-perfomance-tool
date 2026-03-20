@@ -99,8 +99,8 @@ function formatDuration(durationMs: number) {
   return `${minutes}:${seconds}.${milliseconds}`;
 }
 
-function formatTimeWithMilliseconds(timestamp: string) {
-  return new Date(timestamp).toLocaleTimeString([], {
+function formatDateTimeWithMilliseconds(timestamp: string) {
+  return new Date(timestamp).toLocaleString([], {
     hour12: false,
     fractionalSecondDigits: 3,
   });
@@ -327,13 +327,19 @@ export function WorkflowRunnerPage() {
     });
 
     const inferredType = autoClassification.type;
-    const actualType = finalClassification.type;
+    const classifiedType = finalClassification.type;
     const expectedContent = expectedBarcodeContent[currentStep.block];
     const hasExpectedContent = normalizeBarcodeContent(expectedContent).length > 0;
     const matchedExpectedContent =
       !hasExpectedContent ||
       normalizeBarcodeContent(finalClassification.normalizedValue) === normalizeBarcodeContent(expectedContent);
-    const matchedExpectation = actualType === currentStep.expectedType && matchedExpectedContent;
+    const actualType =
+      classifiedType === 'unknown' && hasExpectedContent && matchedExpectedContent
+        ? currentStep.expectedType
+        : classifiedType;
+    const matchedExpectation = hasExpectedContent
+      ? matchedExpectedContent
+      : actualType === currentStep.expectedType;
 
     const saved = await appendEvent(activeSession.id, {
       type: 'scan-received',
@@ -354,6 +360,7 @@ export function WorkflowRunnerPage() {
         workflowBlock: currentStep.block,
         expectedScanType: currentStep.expectedType,
         actualScanType: actualType,
+        classifiedScanType: classifiedType,
         inferredScanType: inferredType,
         matchedExpectation,
         ...(hasExpectedContent ? { expectedBarcodeContent: expectedContent } : {}),
@@ -379,7 +386,7 @@ export function WorkflowRunnerPage() {
       setValidationMessage(
         matchedExpectation
           ? `Matched expected type: ${currentStep.expectedType}.`
-          : actualType === 'unknown'
+          : classifiedType === 'unknown' && !hasExpectedContent
             ? `Unknown barcode type. Expected ${currentStep.expectedType}.`
             : hasExpectedContent && !matchedExpectedContent
               ? `Mismatch: expected content "${expectedContent}", captured "${finalClassification.normalizedValue}".`
@@ -878,7 +885,7 @@ export function WorkflowRunnerPage() {
                   .reverse()
                   .map((event) => (
                     <tr key={event.id}>
-                      <td>{formatTimeWithMilliseconds(event.occurredAt)}</td>
+                      <td>{formatDateTimeWithMilliseconds(event.occurredAt)}</td>
                       <td>{String(event.metadata?.workflowBlock ?? 'n/a')}</td>
                       <td>{String(event.metadata?.expectedScanType ?? 'n/a')}</td>
                       <td>{String(event.metadata?.actualScanType ?? 'n/a')}</td>
