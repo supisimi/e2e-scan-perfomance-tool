@@ -99,6 +99,13 @@ function formatDuration(durationMs: number) {
   return `${minutes}:${seconds}.${milliseconds}`;
 }
 
+function formatTimeWithMilliseconds(timestamp: string) {
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour12: false,
+    fractionalSecondDigits: 3,
+  });
+}
+
 function getStepProgress(eventLog: ScanEvent[]) {
   const accepted = eventLog.filter(
     (event) =>
@@ -201,6 +208,17 @@ export function WorkflowRunnerPage() {
     function maintainScannerFocus() {
       const activeElement = document.activeElement;
       if (activeElement === scannerInputRef.current) {
+        return;
+      }
+
+      if (
+        activeElement instanceof HTMLElement &&
+        (activeElement.isContentEditable ||
+          activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          activeElement.tagName === 'SELECT' ||
+          activeElement.tagName === 'BUTTON')
+      ) {
         return;
       }
 
@@ -860,7 +878,7 @@ export function WorkflowRunnerPage() {
                   .reverse()
                   .map((event) => (
                     <tr key={event.id}>
-                      <td>{new Date(event.occurredAt).toLocaleTimeString()}</td>
+                      <td>{formatTimeWithMilliseconds(event.occurredAt)}</td>
                       <td>{String(event.metadata?.workflowBlock ?? 'n/a')}</td>
                       <td>{String(event.metadata?.expectedScanType ?? 'n/a')}</td>
                       <td>{String(event.metadata?.actualScanType ?? 'n/a')}</td>

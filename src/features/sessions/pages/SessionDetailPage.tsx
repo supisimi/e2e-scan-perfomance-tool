@@ -20,6 +20,13 @@ function formatDuration(durationMs: number) {
   return `${minutes}:${seconds}.${milliseconds}`;
 }
 
+function formatDateTimeWithMilliseconds(timestamp: string) {
+  return new Date(timestamp).toLocaleString([], {
+    hour12: false,
+    fractionalSecondDigits: 3,
+  });
+}
+
 function getInvalidScanCount(session: TestSession) {
   return session.eventLog.filter(
     (event) => event.type === 'scan-received' && (event.isSuccessful === false || event.metadata?.actualScanType === 'unknown')
@@ -504,7 +511,7 @@ export function SessionDetailPage() {
           <tbody>
             {orderedEventLog.map((event) => (
               <tr key={event.id}>
-                <td>{new Date(event.occurredAt).toLocaleString()}</td>
+                <td>{formatDateTimeWithMilliseconds(event.occurredAt)}</td>
                 <td>{event.type}</td>
                 <td>{event.phase ?? '—'}</td>
                 <td>{String(event.metadata?.expectedScanType ?? '—')}</td>
