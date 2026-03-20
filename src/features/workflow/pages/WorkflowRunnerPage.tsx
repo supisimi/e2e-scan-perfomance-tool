@@ -18,51 +18,18 @@ interface WorkflowStep {
   expectedType: ScanType;
   phase?: 'short4' | 'mixed' | 'long4' | 'mid4';
   label: string;
+  expectedBarcodeContent: string;
+  expectedLabel: string;
 }
 
-interface ExpectedBarcodeContentConfig {
-  start: string;
-  short4: string;
-  mixed: string;
-  long4: string;
-  mid4: string;
-  end: string;
+interface BarcodeConfiguration {
+  startBarcode: string;
+  finalBarcode: string;
+  palletBarcode: string;
+  palletCeilingBarcode: string;
+  parcelBarcodes: [string, string, string, string];
+  ceilingBarcodes: [string, string, string, string];
 }
-
-const MIXED_PATTERN: ScanType[] = ['parcel', 'pallet', 'ceiling', 'parcel'];
-
-const WORKFLOW_STEPS: WorkflowStep[] = [
-  { index: 0, block: 'start', expectedType: 'start', label: 'Start Barcode' },
-  ...Array.from({ length: 4 }, (_, index) => ({
-    index: index + 1,
-    block: 'short4' as const,
-    expectedType: 'parcel' as const,
-    phase: 'short4' as const,
-    label: `Short Block ${index + 1}/4`,
-  })),
-  ...Array.from({ length: 16 }, (_, index) => ({
-    index: index + 5,
-    block: 'mixed' as const,
-    expectedType: MIXED_PATTERN[index % MIXED_PATTERN.length],
-    phase: 'mixed' as const,
-    label: `Mixed Block ${index + 1}/16`,
-  })),
-  ...Array.from({ length: 4 }, (_, index) => ({
-    index: index + 21,
-    block: 'long4' as const,
-    expectedType: 'ceiling' as const,
-    phase: 'long4' as const,
-    label: `Long Block ${index + 1}/4`,
-  })),
-  ...Array.from({ length: 4 }, (_, index) => ({
-    index: index + 25,
-    block: 'mid4' as const,
-    expectedType: 'parcel' as const,
-    phase: 'mid4' as const,
-    label: `Mid Block ${index + 1}/4`,
-  })),
-  { index: 29, block: 'end', expectedType: 'start', label: 'End Cycle Barcode' },
-];
 
 const BLOCK_ORDER: BlockKey[] = ['start', 'short4', 'mixed', 'long4', 'mid4', 'end'];
 
@@ -75,17 +42,117 @@ const BLOCK_LABELS: Record<BlockKey, string> = {
   end: 'Final Barcode',
 };
 
-const INITIAL_EXPECTED_BARCODE_CONTENT: ExpectedBarcodeContentConfig = {
-  start: '',
-  short4: '',
-  mixed: '',
-  long4: '',
-  mid4: '',
-  end: '',
+const INITIAL_BARCODE_CONFIGURATION: BarcodeConfiguration = {
+  startBarcode: 'START',
+  finalBarcode: 'FINAL',
+  palletBarcode: 'PALLET',
+  palletCeilingBarcode: 'PALLET-CEILING',
+  parcelBarcodes: ['PARCEL-1', 'PARCEL-2', 'PARCEL-3', 'PARCEL-4'],
+  ceilingBarcodes: ['CEILING-1', 'CEILING-2', 'CEILING-3', 'CEILING-4'],
 };
 
 function normalizeBarcodeContent(input: string) {
   return input.trim().toLowerCase();
+}
+
+function buildWorkflowSteps(config: BarcodeConfiguration): WorkflowStep[] {
+  const steps: WorkflowStep[] = [];
+  let index = 0;
+
+  steps.push({
+    index,
+    block: 'start',
+    expectedType: 'start',
+    label: 'Start Barcode',
+    expectedBarcodeContent: config.startBarcode,
+    expectedLabel: 'Start barcode',
+  });
+  index += 1;
+
+  for (let parcelIndex = 0; parcelIndex < 4; parcelIndex += 1) {
+    steps.push({
+      index,
+      block: 'short4',
+      expectedType: 'parcel',
+      phase: 'short4',
+      label: `Short Block ${parcelIndex + 1}/4`,
+      expectedBarcodeContent: config.parcelBarcodes[parcelIndex],
+      expectedLabel: `Parcel ${parcelIndex + 1}`,
+    });
+    index += 1;
+  }
+
+  for (let roundIndex = 0; roundIndex < 4; roundIndex += 1) {
+    steps.push({
+      index,
+      block: 'mixed',
+      expectedType: 'parcel',
+      phase: 'mixed',
+      label: `Mixed Round ${roundIndex + 1} Parcel`,
+      expectedBarcodeContent: config.parcelBarcodes[roundIndex],
+      expectedLabel: `Parcel ${roundIndex + 1}`,
+    });
+    index += 1;
+
+    steps.push({
+      index,
+      block: 'mixed',
+      expectedType: 'pallet',
+      phase: 'mixed',
+      label: `Mixed Round ${roundIndex + 1} Pallet`,
+      expectedBarcodeContent: config.palletBarcode,
+      expectedLabel: 'Pallet barcode',
+    });
+    index += 1;
+
+    steps.push({
+      index,
+      block: 'mixed',
+      expectedType: 'ceiling',
+      phase: 'mixed',
+      label: `Mixed Round ${roundIndex + 1} Pallet Ceiling`,
+      expectedBarcodeContent: config.palletCeilingBarcode,
+      expectedLabel: 'Pallet ceiling barcode',
+    });
+    index += 1;
+  }
+
+  for (let ceilingIndex = 0; ceilingIndex < 4; ceilingIndex += 1) {
+    steps.push({
+      index,
+      block: 'long4',
+      expectedType: 'ceiling',
+      phase: 'long4',
+      label: `Long Block ${ceilingIndex + 1}/4`,
+      expectedBarcodeContent: config.ceilingBarcodes[ceilingIndex],
+      expectedLabel: `Ceiling ${ceilingIndex + 1}`,
+    });
+    index += 1;
+  }
+
+  for (let parcelIndex = 0; parcelIndex < 4; parcelIndex += 1) {
+    steps.push({
+      index,
+      block: 'mid4',
+      expectedType: 'parcel',
+      phase: 'mid4',
+      label: `Mid Block ${parcelIndex + 1}/4`,
+      expectedBarcodeContent: config.parcelBarcodes[parcelIndex],
+      expectedLabel: `Parcel ${parcelIndex + 1}`,
+    });
+    index += 1;
+  }
+
+  steps.push({
+    index,
+    block: 'end',
+    expectedType: 'start',
+    label: 'Final Barcode',
+    expectedBarcodeContent: config.finalBarcode,
+    expectedLabel: 'Final barcode',
+  });
+
+  return steps;
 }
 
 function isEditableElement(element: Element | null) {
@@ -122,7 +189,7 @@ function formatDateTimeWithMilliseconds(timestamp: string) {
   });
 }
 
-function getStepProgress(eventLog: ScanEvent[]) {
+function getStepProgress(eventLog: ScanEvent[], totalSteps: number) {
   const accepted = eventLog.filter(
     (event) =>
       event.type === 'scan-received' &&
@@ -130,21 +197,25 @@ function getStepProgress(eventLog: ScanEvent[]) {
       event.metadata?.matchedExpectation === true
   );
 
-  return Math.min(accepted.length, WORKFLOW_STEPS.length);
+  return Math.min(accepted.length, totalSteps);
 }
 
-function getBlockProgressCounters(stepIndex: number) {
+function getBlockProgressCounters(stepIndex: number, workflowSteps: WorkflowStep[]) {
   const counters: Record<BlockKey, { completed: number; expected: number }> = {
-    start: { completed: 0, expected: 1 },
-    short4: { completed: 0, expected: 4 },
-    mixed: { completed: 0, expected: 16 },
-    long4: { completed: 0, expected: 4 },
-    mid4: { completed: 0, expected: 4 },
-    end: { completed: 0, expected: 1 },
+    start: { completed: 0, expected: 0 },
+    short4: { completed: 0, expected: 0 },
+    mixed: { completed: 0, expected: 0 },
+    long4: { completed: 0, expected: 0 },
+    mid4: { completed: 0, expected: 0 },
+    end: { completed: 0, expected: 0 },
   };
 
+  for (const step of workflowSteps) {
+    counters[step.block].expected += 1;
+  }
+
   for (let index = 0; index < stepIndex; index += 1) {
-    const step = WORKFLOW_STEPS[index];
+    const step = workflowSteps[index];
     counters[step.block].completed += 1;
   }
 
@@ -203,8 +274,8 @@ export function WorkflowRunnerPage() {
   const [lastCapturedBarcode, setLastCapturedBarcode] = useState('');
   const [lastCapturedAtMs, setLastCapturedAtMs] = useState<number>();
   const [validationMessage, setValidationMessage] = useState('');
-  const [expectedBarcodeContent, setExpectedBarcodeContent] = useState<ExpectedBarcodeContentConfig>(
-    INITIAL_EXPECTED_BARCODE_CONTENT
+  const [barcodeConfiguration, setBarcodeConfiguration] = useState<BarcodeConfiguration>(
+    INITIAL_BARCODE_CONFIGURATION
   );
   const [isSessionRunning, setIsSessionRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -263,6 +334,8 @@ export function WorkflowRunnerPage() {
     }
   }, [selectedSessionId, sessions]);
 
+  const workflowSteps = useMemo(() => buildWorkflowSteps(barcodeConfiguration), [barcodeConfiguration]);
+
   useEffect(() => {
     if (!selectedSessionId) {
       setActiveSession(undefined);
@@ -287,13 +360,16 @@ export function WorkflowRunnerPage() {
     void loadSelectedSession();
   }, [selectedSessionId, loadSession]);
 
-  const workflowStepIndex = useMemo(
-    () => (activeSession ? getStepProgress(activeSession.eventLog) : 0),
-    [activeSession]
-  );
+  const workflowStepIndex = useMemo(() => {
+    if (!activeSession) {
+      return 0;
+    }
 
-  const currentStep = WORKFLOW_STEPS[workflowStepIndex];
-  const isCompleted = workflowStepIndex >= WORKFLOW_STEPS.length;
+    return getStepProgress(activeSession.eventLog, workflowSteps.length);
+  }, [activeSession, workflowSteps.length]);
+
+  const currentStep = workflowSteps[workflowStepIndex];
+  const isCompleted = workflowStepIndex >= workflowSteps.length;
 
   const elapsedSessionMs = useMemo(() => {
     if (!isSessionRunning) {
@@ -304,16 +380,17 @@ export function WorkflowRunnerPage() {
     return Math.max(0, clockTick - sessionStartedAtMs - pausedAccumulatedMs - pausedActiveDuration);
   }, [clockTick, isPaused, isSessionRunning, pauseStartedAtMs, pausedAccumulatedMs, sessionStartedAtMs]);
 
-  const blockCounters = useMemo(() => getBlockProgressCounters(workflowStepIndex), [workflowStepIndex]);
+  const blockCounters = useMemo(
+    () => getBlockProgressCounters(workflowStepIndex, workflowSteps),
+    [workflowStepIndex, workflowSteps]
+  );
 
   const blockTimers = useMemo(
     () => getBlockTimers(activeSession?.eventLog ?? [], clockTick),
     [activeSession?.eventLog, clockTick]
   );
 
-  const expectedBarcodeContentForCurrentStep = currentStep
-    ? expectedBarcodeContent[currentStep.block]
-    : '';
+  const expectedBarcodeContentForCurrentStep = currentStep ? currentStep.expectedBarcodeContent : '';
 
   function isLikelyScannerBurst(barcodeText: string, timestamps: number[]) {
     if (barcodeText.length < 4 || timestamps.length <= 1) {
@@ -351,18 +428,48 @@ export function WorkflowRunnerPage() {
 
     const inferredType = autoClassification.type;
     const classifiedType = finalClassification.type;
-    const expectedContent = expectedBarcodeContent[currentStep.block];
-    const hasExpectedContent = normalizeBarcodeContent(expectedContent).length > 0;
-    const matchedExpectedContent =
-      !hasExpectedContent ||
-      normalizeBarcodeContent(finalClassification.normalizedValue) === normalizeBarcodeContent(expectedContent);
+    const normalizedActualBarcode = normalizeBarcodeContent(finalClassification.normalizedValue);
+    const matchedEventsForBlock = activeSession.eventLog.filter(
+      (event) =>
+        event.type === 'scan-received' &&
+        event.metadata?.workflowId === 'multi-range-v1' &&
+        event.metadata?.workflowBlock === currentStep.block &&
+        event.metadata?.matchedExpectation === true
+    );
+
+    const matchedBarcodesForBlock = new Set(
+      matchedEventsForBlock
+        .map((event) => normalizeBarcodeContent(event.barcode?.normalizedValue ?? ''))
+        .filter((value) => value.length > 0)
+    );
+
+    const remainingParcelValues = barcodeConfiguration.parcelBarcodes
+      .map((barcode) => normalizeBarcodeContent(barcode))
+      .filter((barcode) => barcode.length > 0 && !matchedBarcodesForBlock.has(barcode));
+
+    const remainingCeilingValues = barcodeConfiguration.ceilingBarcodes
+      .map((barcode) => normalizeBarcodeContent(barcode))
+      .filter((barcode) => barcode.length > 0 && !matchedBarcodesForBlock.has(barcode));
+
+    let expectedContent = normalizeBarcodeContent(currentStep.expectedBarcodeContent);
+    let matchedExpectedContent = normalizedActualBarcode === expectedContent;
+
+    if (currentStep.block === 'short4' || currentStep.block === 'mid4') {
+      matchedExpectedContent = remainingParcelValues.includes(normalizedActualBarcode);
+      expectedContent = remainingParcelValues.join(' | ');
+    }
+
+    if (currentStep.block === 'long4') {
+      matchedExpectedContent = remainingCeilingValues.includes(normalizedActualBarcode);
+      expectedContent = remainingCeilingValues.join(' | ');
+    }
+
+    const hasExpectedContent = expectedContent.length > 0;
     const actualType =
       classifiedType === 'unknown' && hasExpectedContent && matchedExpectedContent
         ? currentStep.expectedType
         : classifiedType;
-    const matchedExpectation = hasExpectedContent
-      ? matchedExpectedContent
-      : actualType === currentStep.expectedType;
+    const matchedExpectation = matchedExpectedContent;
 
     const saved = await appendEvent(activeSession.id, {
       type: 'scan-received',
@@ -408,21 +515,52 @@ export function WorkflowRunnerPage() {
       );
       setValidationMessage(
         matchedExpectation
-          ? `Matched expected type: ${currentStep.expectedType}.`
-          : classifiedType === 'unknown' && !hasExpectedContent
-            ? `Unknown barcode type. Expected ${currentStep.expectedType}.`
-            : hasExpectedContent && !matchedExpectedContent
-              ? `Mismatch: expected content "${expectedContent}", captured "${finalClassification.normalizedValue}".`
-            : `Mismatch: expected ${currentStep.expectedType}, captured ${actualType}.`
+          ? `Matched expected barcode content for ${currentStep.label}.`
+          : hasExpectedContent
+            ? `Mismatch: expected "${expectedContent}", captured "${finalClassification.normalizedValue}".`
+            : `No expected barcode content configured for ${currentStep.label}.`
       );
     }
   }
 
-  function updateExpectedBarcodeContent(block: BlockKey, value: string) {
-    setExpectedBarcodeContent((previous) => ({
-      ...previous,
-      [block]: value,
-    }));
+  function updateStartBarcode(value: string) {
+    setBarcodeConfiguration((previous) => ({ ...previous, startBarcode: value }));
+  }
+
+  function updateFinalBarcode(value: string) {
+    setBarcodeConfiguration((previous) => ({ ...previous, finalBarcode: value }));
+  }
+
+  function updatePalletBarcode(value: string) {
+    setBarcodeConfiguration((previous) => ({ ...previous, palletBarcode: value }));
+  }
+
+  function updatePalletCeilingBarcode(value: string) {
+    setBarcodeConfiguration((previous) => ({ ...previous, palletCeilingBarcode: value }));
+  }
+
+  function updateParcelBarcode(index: number, value: string) {
+    setBarcodeConfiguration((previous) => {
+      const parcelBarcodes = [...previous.parcelBarcodes] as BarcodeConfiguration['parcelBarcodes'];
+      parcelBarcodes[index] = value;
+
+      return {
+        ...previous,
+        parcelBarcodes,
+      };
+    });
+  }
+
+  function updateCeilingBarcode(index: number, value: string) {
+    setBarcodeConfiguration((previous) => {
+      const ceilingBarcodes = [...previous.ceilingBarcodes] as BarcodeConfiguration['ceilingBarcodes'];
+      ceilingBarcodes[index] = value;
+
+      return {
+        ...previous,
+        ceilingBarcodes,
+      };
+    });
   }
 
   async function completeScannerBuffer(
@@ -721,7 +859,7 @@ export function WorkflowRunnerPage() {
             </div>
             <div className="runner-card">
               <p className="runner-card-title">Expected Next Scan</p>
-              <p className="runner-card-value">{isCompleted ? 'None' : currentStep.expectedType}</p>
+              <p className="runner-card-value">{isCompleted ? 'None' : currentStep.expectedLabel}</p>
             </div>
             <div className={isSessionRunning && !isPaused ? 'runner-card runner-card-active' : 'runner-card'}>
               <p className="runner-card-title">Session Timer</p>
@@ -730,7 +868,7 @@ export function WorkflowRunnerPage() {
             <div className="runner-card">
               <p className="runner-card-title">Progress</p>
               <p className="runner-card-value">
-                {workflowStepIndex}/{WORKFLOW_STEPS.length}
+                {workflowStepIndex}/{workflowSteps.length}
               </p>
             </div>
           </div>
@@ -772,7 +910,7 @@ export function WorkflowRunnerPage() {
           <div className="runner-progress-panel">
             <h3>Expected Barcode Content</h3>
             <p className="muted">
-              Define expected barcode content for each block. Matching is exact (case-insensitive, trimmed).
+              Define exact barcode values before start. Matching is exact (case-insensitive, trimmed).
             </p>
             <div className="session-form-grid">
               <label className="session-field">
@@ -780,57 +918,9 @@ export function WorkflowRunnerPage() {
                 <input
                   className="session-input"
                   data-scanner-editable="true"
-                  value={expectedBarcodeContent.start}
-                  onChange={(event) => updateExpectedBarcodeContent('start', event.target.value)}
+                  value={barcodeConfiguration.startBarcode}
+                  onChange={(event) => updateStartBarcode(event.target.value)}
                   placeholder="Expected start barcode content"
-                  disabled={isSessionRunning}
-                />
-              </label>
-
-              <label className="session-field">
-                <span className="session-label">Short Block</span>
-                <input
-                  className="session-input"
-                  data-scanner-editable="true"
-                  value={expectedBarcodeContent.short4}
-                  onChange={(event) => updateExpectedBarcodeContent('short4', event.target.value)}
-                  placeholder="Expected short block content"
-                  disabled={isSessionRunning}
-                />
-              </label>
-
-              <label className="session-field">
-                <span className="session-label">Mixed Block</span>
-                <input
-                  className="session-input"
-                  data-scanner-editable="true"
-                  value={expectedBarcodeContent.mixed}
-                  onChange={(event) => updateExpectedBarcodeContent('mixed', event.target.value)}
-                  placeholder="Expected mixed block content"
-                  disabled={isSessionRunning}
-                />
-              </label>
-
-              <label className="session-field">
-                <span className="session-label">Long Block</span>
-                <input
-                  className="session-input"
-                  data-scanner-editable="true"
-                  value={expectedBarcodeContent.long4}
-                  onChange={(event) => updateExpectedBarcodeContent('long4', event.target.value)}
-                  placeholder="Expected long block content"
-                  disabled={isSessionRunning}
-                />
-              </label>
-
-              <label className="session-field">
-                <span className="session-label">Mid Block</span>
-                <input
-                  className="session-input"
-                  data-scanner-editable="true"
-                  value={expectedBarcodeContent.mid4}
-                  onChange={(event) => updateExpectedBarcodeContent('mid4', event.target.value)}
-                  placeholder="Expected mid block content"
                   disabled={isSessionRunning}
                 />
               </label>
@@ -840,12 +930,64 @@ export function WorkflowRunnerPage() {
                 <input
                   className="session-input"
                   data-scanner-editable="true"
-                  value={expectedBarcodeContent.end}
-                  onChange={(event) => updateExpectedBarcodeContent('end', event.target.value)}
+                  value={barcodeConfiguration.finalBarcode}
+                  onChange={(event) => updateFinalBarcode(event.target.value)}
                   placeholder="Expected final barcode content"
                   disabled={isSessionRunning}
                 />
               </label>
+
+              <label className="session-field">
+                <span className="session-label">Pallet Barcode</span>
+                <input
+                  className="session-input"
+                  data-scanner-editable="true"
+                  value={barcodeConfiguration.palletBarcode}
+                  onChange={(event) => updatePalletBarcode(event.target.value)}
+                  placeholder="Expected pallet barcode content"
+                  disabled={isSessionRunning}
+                />
+              </label>
+
+              <label className="session-field">
+                <span className="session-label">Pallet Ceiling Barcode</span>
+                <input
+                  className="session-input"
+                  data-scanner-editable="true"
+                  value={barcodeConfiguration.palletCeilingBarcode}
+                  onChange={(event) => updatePalletCeilingBarcode(event.target.value)}
+                  placeholder="Expected pallet ceiling barcode content"
+                  disabled={isSessionRunning}
+                />
+              </label>
+
+              {barcodeConfiguration.parcelBarcodes.map((barcodeValue, index) => (
+                <label key={`parcel-${index + 1}`} className="session-field">
+                  <span className="session-label">Parcel Barcode {index + 1}</span>
+                  <input
+                    className="session-input"
+                    data-scanner-editable="true"
+                    value={barcodeValue}
+                    onChange={(event) => updateParcelBarcode(index, event.target.value)}
+                    placeholder={`Expected parcel barcode ${index + 1}`}
+                    disabled={isSessionRunning}
+                  />
+                </label>
+              ))}
+
+              {barcodeConfiguration.ceilingBarcodes.map((barcodeValue, index) => (
+                <label key={`ceiling-${index + 1}`} className="session-field">
+                  <span className="session-label">Ceiling Barcode {index + 1}</span>
+                  <input
+                    className="session-input"
+                    data-scanner-editable="true"
+                    value={barcodeValue}
+                    onChange={(event) => updateCeilingBarcode(index, event.target.value)}
+                    placeholder={`Expected ceiling barcode ${index + 1}`}
+                    disabled={isSessionRunning}
+                  />
+                </label>
+              ))}
             </div>
 
             <p className="muted">
@@ -962,7 +1104,7 @@ export function WorkflowRunnerPage() {
                   <th>Time</th>
                   <th>Block</th>
                   <th>Expected</th>
-                  <th>Actual</th>
+                  <th>Actual Barcode</th>
                   <th>Result</th>
                 </tr>
               </thead>
@@ -975,8 +1117,8 @@ export function WorkflowRunnerPage() {
                     <tr key={event.id}>
                       <td>{formatDateTimeWithMilliseconds(event.occurredAt)}</td>
                       <td>{String(event.metadata?.workflowBlock ?? 'n/a')}</td>
-                      <td>{String(event.metadata?.expectedScanType ?? 'n/a')}</td>
-                      <td>{String(event.metadata?.actualScanType ?? 'n/a')}</td>
+                      <td>{String(event.metadata?.expectedBarcodeContent ?? 'n/a')}</td>
+                      <td>{event.barcode?.normalizedValue ?? 'n/a'}</td>
                       <td>{event.isSuccessful === false ? 'Mismatch' : 'Accepted'}</td>
                     </tr>
                   ))}
