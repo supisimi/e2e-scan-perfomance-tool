@@ -213,11 +213,7 @@ export function WorkflowRunnerPage() {
 
       if (
         activeElement instanceof HTMLElement &&
-        (activeElement.isContentEditable ||
-          activeElement.tagName === 'INPUT' ||
-          activeElement.tagName === 'TEXTAREA' ||
-          activeElement.tagName === 'SELECT' ||
-          activeElement.tagName === 'BUTTON')
+        (activeElement.isContentEditable || activeElement.dataset.scannerEditable === 'true')
       ) {
         return;
       }
@@ -504,6 +500,8 @@ export function WorkflowRunnerPage() {
         setActiveSession(saved);
       }
 
+      scannerInputRef.current?.focus();
+
       return;
     }
 
@@ -522,6 +520,8 @@ export function WorkflowRunnerPage() {
     if (saved) {
       setActiveSession(saved);
     }
+
+    scannerInputRef.current?.focus();
   }
 
   async function handleReset() {
@@ -703,6 +703,7 @@ export function WorkflowRunnerPage() {
                 <span className="session-label">Start Barcode</span>
                 <input
                   className="session-input"
+                  data-scanner-editable="true"
                   value={expectedBarcodeContent.start}
                   onChange={(event) => updateExpectedBarcodeContent('start', event.target.value)}
                   placeholder="Expected start barcode content"
@@ -713,6 +714,7 @@ export function WorkflowRunnerPage() {
                 <span className="session-label">Short Block</span>
                 <input
                   className="session-input"
+                  data-scanner-editable="true"
                   value={expectedBarcodeContent.short4}
                   onChange={(event) => updateExpectedBarcodeContent('short4', event.target.value)}
                   placeholder="Expected short block content"
@@ -723,6 +725,7 @@ export function WorkflowRunnerPage() {
                 <span className="session-label">Mixed Block</span>
                 <input
                   className="session-input"
+                  data-scanner-editable="true"
                   value={expectedBarcodeContent.mixed}
                   onChange={(event) => updateExpectedBarcodeContent('mixed', event.target.value)}
                   placeholder="Expected mixed block content"
@@ -733,6 +736,7 @@ export function WorkflowRunnerPage() {
                 <span className="session-label">Long Block</span>
                 <input
                   className="session-input"
+                  data-scanner-editable="true"
                   value={expectedBarcodeContent.long4}
                   onChange={(event) => updateExpectedBarcodeContent('long4', event.target.value)}
                   placeholder="Expected long block content"
@@ -743,6 +747,7 @@ export function WorkflowRunnerPage() {
                 <span className="session-label">Mid Block</span>
                 <input
                   className="session-input"
+                  data-scanner-editable="true"
                   value={expectedBarcodeContent.mid4}
                   onChange={(event) => updateExpectedBarcodeContent('mid4', event.target.value)}
                   placeholder="Expected mid block content"
@@ -753,6 +758,7 @@ export function WorkflowRunnerPage() {
                 <span className="session-label">Final Barcode</span>
                 <input
                   className="session-input"
+                  data-scanner-editable="true"
                   value={expectedBarcodeContent.end}
                   onChange={(event) => updateExpectedBarcodeContent('end', event.target.value)}
                   placeholder="Expected final barcode content"
