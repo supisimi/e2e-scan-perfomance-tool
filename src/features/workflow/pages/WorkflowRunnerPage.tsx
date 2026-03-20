@@ -88,6 +88,22 @@ function normalizeBarcodeContent(input: string) {
   return input.trim().toLowerCase();
 }
 
+function isEditableElement(element: Element | null) {
+  if (!(element instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (element.isContentEditable) {
+    return true;
+  }
+
+  if (element.dataset.scannerEditable === 'true') {
+    return true;
+  }
+
+  return element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT';
+}
+
 function formatDuration(durationMs: number) {
   const safeDurationMs = Math.max(0, Math.floor(durationMs));
   const totalSeconds = Math.floor(safeDurationMs / 1000);
@@ -297,7 +313,7 @@ export function WorkflowRunnerPage() {
     const last = timestamps[timestamps.length - 1];
     const averageIntervalMs = (last - first) / (timestamps.length - 1);
 
-    return averageIntervalMs <= 45;
+    return averageIntervalMs <= 120;
   }
 
   async function processCapturedBarcode(
@@ -424,37 +440,38 @@ export function WorkflowRunnerPage() {
     setScannerCharTimestamps([]);
   }
 
-  async function handleScannerKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+  async function processScannerKey(key: string) {
     if (!isSessionRunning || isPaused || isCompleted || isSaving) {
       return;
     }
 
-    if (event.key === 'Enter' || event.key === 'Tab') {
-      event.preventDefault();
+    if (key === 'Enter' || key === 'Tab') {
       await completeScannerBuffer();
       return;
     }
 
-    if (event.key === 'Backspace') {
-      event.preventDefault();
+    if (key === 'Backspace') {
       setScannerBuffer((previous) => previous.slice(0, -1));
       setScannerCharTimestamps((previous) => previous.slice(0, -1));
       return;
     }
 
-    if (event.key === 'Escape') {
-      event.preventDefault();
+    if (key === 'Escape') {
       setScannerBuffer('');
       setScannerCharTimestamps([]);
       return;
     }
 
-    if (event.key.length === 1) {
-      event.preventDefault();
+    if (key.length === 1) {
       const nowMs = Date.now();
-      setScannerBuffer((previous) => `${previous}${event.key}`);
+      setScannerBuffer((previous) => `${previous}${key}`);
       setScannerCharTimestamps((previous) => [...previous, nowMs]);
     }
+  }
+
+  async function handleScannerKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    event.preventDefault();
+    await processScannerKey(event.key);
   }
 
   async function handleScannerInputChange(value: string) {
@@ -475,6 +492,27 @@ export function WorkflowRunnerPage() {
 
     setScannerBuffer(value);
   }
+
+  useEffect(() => {
+    function onWindowKeyDown(event: globalThis.KeyboardEvent) {
+      if (isEditableElement(document.activeElement)) {
+        return;
+      }
+
+      if (!isSessionRunning || isPaused || isCompleted || isSaving) {
+        return;
+      }
+
+      event.preventDefault();
+      void processScannerKey(event.key);
+    }
+
+    window.addEventListener('keydown', onWindowKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', onWindowKeyDown);
+    };
+  }, [isCompleted, isPaused, isSaving, isSessionRunning, processScannerKey]);
 
   async function handlePauseResume() {
     if (!activeSession || !isSessionRunning) {
