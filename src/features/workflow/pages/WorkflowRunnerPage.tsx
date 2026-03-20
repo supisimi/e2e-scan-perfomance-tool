@@ -90,7 +90,7 @@ function buildWorkflowSteps(config: BarcodeConfiguration): WorkflowStep[] {
       phase: 'mixed',
       label: `Mixed Round ${roundIndex + 1} Parcel`,
       expectedBarcodeContent: config.parcelBarcodes[roundIndex],
-      expectedLabel: `Parcel ${roundIndex + 1}`,
+      expectedLabel: 'Any remaining parcel barcode',
     });
     index += 1;
 
@@ -457,6 +457,11 @@ export function WorkflowRunnerPage() {
     let matchedExpectedContent = normalizedActualBarcode === expectedContent;
 
     if (currentStep.block === 'short4' || currentStep.block === 'mid4') {
+      matchedExpectedContent = remainingParcelValues.includes(normalizedActualBarcode);
+      expectedContent = remainingParcelValues.join(' | ');
+    }
+
+    if (currentStep.block === 'mixed' && currentStep.expectedType === 'parcel') {
       matchedExpectedContent = remainingParcelValues.includes(normalizedActualBarcode);
       expectedContent = remainingParcelValues.join(' | ');
     }
