@@ -53,18 +53,14 @@ function matchesDateRange(session: TestSession, filters: DashboardFilters) {
 }
 
 function formatDuration(durationMs: number) {
-  if (durationMs <= 0) {
-    return '0 s';
-  }
-
-  const seconds = Math.round(durationMs / 1000);
-  if (seconds < 60) {
-    return `${seconds} s`;
-  }
-
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return `${minutes}m ${remainingSeconds}s`;
+  const safeDurationMs = Math.max(0, Math.floor(durationMs));
+  const totalSeconds = Math.floor(safeDurationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60)
+    .toString()
+    .padStart(2, '0');
+  const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+  const milliseconds = (safeDurationMs % 1000).toString().padStart(3, '0');
+  return `${minutes}:${seconds}.${milliseconds}`;
 }
 
 function getInvalidScanCount(session: TestSession) {

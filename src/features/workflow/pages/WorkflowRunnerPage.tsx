@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSessionPersistence, useSessions } from '../../../data';
 import { EmptyState, ErrorState } from '../../../shared/components';
@@ -10,7 +10,6 @@ import {
 import type { ScanEvent, TestSession } from '../../../types';
 
 type ScanType = BarcodeType;
-type ScanInputMode = 'auto' | ScanType;
 type BlockKey = 'start' | 'short4' | 'mixed' | 'long4' | 'mid4' | 'end';
 
 interface WorkflowStep {
@@ -19,6 +18,15 @@ interface WorkflowStep {
   expectedType: ScanType;
   phase?: 'short4' | 'mixed' | 'long4' | 'mid4';
   label: string;
+}
+
+interface ExpectedBarcodeContentConfig {
+  start: string;
+  short4: string;
+  mixed: string;
+  long4: string;
+  mid4: string;
+  end: string;
 }
 
 const MIXED_PATTERN: ScanType[] = ['parcel', 'pallet', 'ceiling', 'parcel'];
@@ -67,13 +75,28 @@ const BLOCK_LABELS: Record<BlockKey, string> = {
   end: 'Final Barcode',
 };
 
+const INITIAL_EXPECTED_BARCODE_CONTENT: ExpectedBarcodeContentConfig = {
+  start: '',
+  short4: '',
+  mixed: '',
+  long4: '',
+  mid4: '',
+  end: '',
+};
+
+function normalizeBarcodeContent(input: string) {
+  return input.trim().toLowerCase();
+}
+
 function formatDuration(durationMs: number) {
-  const totalSeconds = Math.floor(durationMs / 1000);
+  const safeDurationMs = Math.max(0, Math.floor(durationMs));
+  const totalSeconds = Math.floor(safeDurationMs / 1000);
   const minutes = Math.floor(totalSeconds / 60)
     .toString()
     .padStart(2, '0');
   const seconds = (totalSeconds % 60).toString().padStart(2, '0');
-  return `${minutes}:${seconds}`;
+  const milliseconds = (safeDurationMs % 1000).toString().padStart(3, '0');
+  return `${minutes}:${seconds}.${milliseconds}`;
 }
 
 function getStepProgress(eventLog: ScanEvent[]) {
@@ -150,12 +173,14 @@ export function WorkflowRunnerPage() {
   const scannerInputRef = useRef<HTMLInputElement>(null);
   const [scannerBuffer, setScannerBuffer] = useState('');
   const [scannerCharTimestamps, setScannerCharTimestamps] = useState<number[]>([]);
-  const [manualInput, setManualInput] = useState('');
-  const [scanMode, setScanMode] = useState<ScanInputMode>('auto');
   const [statusMessage, setStatusMessage] = useState('');
   const [lastCapturedBarcode, setLastCapturedBarcode] = useState('');
   const [lastCapturedAtMs, setLastCapturedAtMs] = useState<number>();
   const [validationMessage, setValidationMessage] = useState('');
+  const [expectedBarcodeContent, setExpectedBarcodeContent] = useState<ExpectedBarcodeContentConfig>(
+    INITIAL_EXPECTED_BARCODE_CONTENT
+  );
+  const [isSessionRunning, setIsSessionRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [sessionStartedAtMs, setSessionStartedAtMs] = useState<number>(Date.now());
   const [pausedAccumulatedMs, setPausedAccumulatedMs] = useState<number>(0);
@@ -176,13 +201,6 @@ export function WorkflowRunnerPage() {
     function maintainScannerFocus() {
       const activeElement = document.activeElement;
       if (activeElement === scannerInputRef.current) {
-        return;
-      }
-
-      if (
-        activeElement instanceof HTMLElement &&
-        activeElement.dataset.scannerFallback === 'true'
-      ) {
         return;
       }
 
@@ -218,6 +236,11 @@ export function WorkflowRunnerPage() {
       if (loaded) {
         setSessionStartedAtMs(new Date(loaded.startedAt).getTime());
       }
+
+      setIsSessionRunning(false);
+      setIsPaused(false);
+      setPausedAccumulatedMs(0);
+      setPauseStartedAtMs(undefined);
     }
 
     void loadSelectedSession();
@@ -232,9 +255,13 @@ export function WorkflowRunnerPage() {
   const isCompleted = workflowStepIndex >= WORKFLOW_STEPS.length;
 
   const elapsedSessionMs = useMemo(() => {
+    if (!isSessionRunning) {
+      return 0;
+    }
+
     const pausedActiveDuration = isPaused && pauseStartedAtMs ? clockTick - pauseStartedAtMs : 0;
     return Math.max(0, clockTick - sessionStartedAtMs - pausedAccumulatedMs - pausedActiveDuration);
-  }, [clockTick, isPaused, pauseStartedAtMs, pausedAccumulatedMs, sessionStartedAtMs]);
+  }, [clockTick, isPaused, isSessionRunning, pauseStartedAtMs, pausedAccumulatedMs, sessionStartedAtMs]);
 
   const blockCounters = useMemo(() => getBlockProgressCounters(workflowStepIndex), [workflowStepIndex]);
 
@@ -242,6 +269,10 @@ export function WorkflowRunnerPage() {
     () => getBlockTimers(activeSession?.eventLog ?? [], clockTick),
     [activeSession?.eventLog, clockTick]
   );
+
+  const expectedBarcodeContentForCurrentStep = currentStep
+    ? expectedBarcodeContent[currentStep.block]
+    : '';
 
   function isLikelyScannerBurst(barcodeText: string, timestamps: number[]) {
     if (barcodeText.length < 4 || timestamps.length <= 1) {
@@ -257,10 +288,10 @@ export function WorkflowRunnerPage() {
 
   async function processCapturedBarcode(
     rawBarcode: string,
-    source: 'scanner' | 'manual',
+    source: 'scanner',
     capturedAtMs: number
   ) {
-    if (!activeSession || !currentStep || isPaused || isSaving || isCompleted) {
+    if (!activeSession || !currentStep || !isSessionRunning || isPaused || isSaving || isCompleted) {
       return;
     }
 
@@ -275,12 +306,16 @@ export function WorkflowRunnerPage() {
 
     const finalClassification = classifyBarcodeType(rawValue, {
       settings: DEFAULT_BARCODE_CLASSIFICATION_SETTINGS,
-      manualOverride: scanMode === 'auto' ? undefined : scanMode,
     });
 
     const inferredType = autoClassification.type;
     const actualType = finalClassification.type;
-    const matchedExpectation = actualType === currentStep.expectedType;
+    const expectedContent = expectedBarcodeContent[currentStep.block];
+    const hasExpectedContent = normalizeBarcodeContent(expectedContent).length > 0;
+    const matchedExpectedContent =
+      !hasExpectedContent ||
+      normalizeBarcodeContent(finalClassification.normalizedValue) === normalizeBarcodeContent(expectedContent);
+    const matchedExpectation = actualType === currentStep.expectedType && matchedExpectedContent;
 
     const saved = await appendEvent(activeSession.id, {
       type: 'scan-received',
@@ -303,7 +338,9 @@ export function WorkflowRunnerPage() {
         actualScanType: actualType,
         inferredScanType: inferredType,
         matchedExpectation,
-        manualOverride: scanMode !== 'auto',
+        ...(hasExpectedContent ? { expectedBarcodeContent: expectedContent } : {}),
+        matchedExpectedBarcodeContent: matchedExpectedContent,
+        manualOverride: false,
         matchedBy: finalClassification.matchedBy,
         matchedRule: finalClassification.matchedRule ?? 'n/a',
         inputSource: source,
@@ -317,16 +354,27 @@ export function WorkflowRunnerPage() {
       setStatusMessage(
         matchedExpectation
           ? `Accepted: ${actualType}. Next step advanced.`
-          : `Recorded mismatch. Expected ${currentStep.expectedType}, got ${actualType}.`
+          : hasExpectedContent
+            ? `Recorded mismatch. Expected ${currentStep.expectedType} and content "${expectedContent}", got ${actualType}.`
+            : `Recorded mismatch. Expected ${currentStep.expectedType}, got ${actualType}.`
       );
       setValidationMessage(
         matchedExpectation
           ? `Matched expected type: ${currentStep.expectedType}.`
           : actualType === 'unknown'
-            ? `Unknown barcode type. Expected ${currentStep.expectedType}. Use manual override to correct.`
+            ? `Unknown barcode type. Expected ${currentStep.expectedType}.`
+            : hasExpectedContent && !matchedExpectedContent
+              ? `Mismatch: expected content "${expectedContent}", captured "${finalClassification.normalizedValue}".`
             : `Mismatch: expected ${currentStep.expectedType}, captured ${actualType}.`
       );
     }
+  }
+
+  function updateExpectedBarcodeContent(block: BlockKey, value: string) {
+    setExpectedBarcodeContent((previous) => ({
+      ...previous,
+      [block]: value,
+    }));
   }
 
   async function completeScannerBuffer(
@@ -343,7 +391,7 @@ export function WorkflowRunnerPage() {
     }
 
     if (!isLikelyScannerBurst(capturedBarcode, timestamps)) {
-      setValidationMessage('Input ignored as manual typing. Use Manual Input for keyboard testing.');
+      setValidationMessage('Input ignored as manual typing. Scanner capture only.');
       setScannerBuffer('');
       setScannerCharTimestamps([]);
       return;
@@ -355,19 +403,8 @@ export function WorkflowRunnerPage() {
     setScannerCharTimestamps([]);
   }
 
-  async function handleManualSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const value = manualInput.trim();
-    if (!value) {
-      return;
-    }
-
-    await processCapturedBarcode(value, 'manual', Date.now());
-    setManualInput('');
-  }
-
   async function handleScannerKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (isPaused || isCompleted || isSaving) {
+    if (!isSessionRunning || isPaused || isCompleted || isSaving) {
       return;
     }
 
@@ -419,7 +456,7 @@ export function WorkflowRunnerPage() {
   }
 
   async function handlePauseResume() {
-    if (!activeSession) {
+    if (!activeSession || !isSessionRunning) {
       return;
     }
 
@@ -479,7 +516,35 @@ export function WorkflowRunnerPage() {
     setPausedAccumulatedMs(0);
     setPauseStartedAtMs(undefined);
     setIsPaused(false);
+    setIsSessionRunning(false);
     setStatusMessage('Workflow reset. Event log cleared.');
+  }
+
+  async function handleStartSession() {
+    if (!activeSession || isSaving || isCompleted || isSessionRunning) {
+      return;
+    }
+
+    const nowMs = Date.now();
+    setSessionStartedAtMs(nowMs);
+    setPausedAccumulatedMs(0);
+    setPauseStartedAtMs(undefined);
+    setIsPaused(false);
+    setIsSessionRunning(true);
+    setStatusMessage('Session timer started.');
+
+    const saved = await appendEvent(activeSession.id, {
+      type: 'session-note',
+      note: 'Workflow timer started',
+      metadata: {
+        workflowId: 'multi-range-v1',
+        action: 'start',
+      },
+    });
+
+    if (saved) {
+      setActiveSession(saved);
+    }
   }
 
   const markCompletedIfNeeded = useCallback(async () => {
@@ -557,7 +622,7 @@ export function WorkflowRunnerPage() {
               <p className="runner-card-title">Expected Next Scan</p>
               <p className="runner-card-value">{isCompleted ? 'None' : currentStep.expectedType}</p>
             </div>
-            <div className="runner-card">
+            <div className={isSessionRunning && !isPaused ? 'runner-card runner-card-active' : 'runner-card'}>
               <p className="runner-card-title">Session Timer</p>
               <p className="runner-card-value">{formatDuration(elapsedSessionMs)}</p>
             </div>
@@ -570,7 +635,20 @@ export function WorkflowRunnerPage() {
           </div>
 
           <div className="runner-actions">
-            <button type="button" className="btn-secondary" onClick={() => void handlePauseResume()} disabled={isSaving}>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => void handleStartSession()}
+              disabled={isSessionRunning || isCompleted || isSaving}
+            >
+              Start Session
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => void handlePauseResume()}
+              disabled={!isSessionRunning || isSaving}
+            >
               {isPaused ? 'Resume' : 'Pause'}
             </button>
             <button type="button" className="btn-danger" onClick={() => void handleReset()} disabled={isSaving}>
@@ -591,6 +669,78 @@ export function WorkflowRunnerPage() {
           />
 
           <div className="runner-progress-panel">
+            <h3>Expected Barcode Content</h3>
+            <p className="muted">
+              Define expected barcode content for each block. Matching is exact (case-insensitive, trimmed).
+            </p>
+            <div className="session-form-grid">
+              <label className="session-field">
+                <span className="session-label">Start Barcode</span>
+                <input
+                  className="session-input"
+                  value={expectedBarcodeContent.start}
+                  onChange={(event) => updateExpectedBarcodeContent('start', event.target.value)}
+                  placeholder="Expected start barcode content"
+                />
+              </label>
+
+              <label className="session-field">
+                <span className="session-label">Short Block</span>
+                <input
+                  className="session-input"
+                  value={expectedBarcodeContent.short4}
+                  onChange={(event) => updateExpectedBarcodeContent('short4', event.target.value)}
+                  placeholder="Expected short block content"
+                />
+              </label>
+
+              <label className="session-field">
+                <span className="session-label">Mixed Block</span>
+                <input
+                  className="session-input"
+                  value={expectedBarcodeContent.mixed}
+                  onChange={(event) => updateExpectedBarcodeContent('mixed', event.target.value)}
+                  placeholder="Expected mixed block content"
+                />
+              </label>
+
+              <label className="session-field">
+                <span className="session-label">Long Block</span>
+                <input
+                  className="session-input"
+                  value={expectedBarcodeContent.long4}
+                  onChange={(event) => updateExpectedBarcodeContent('long4', event.target.value)}
+                  placeholder="Expected long block content"
+                />
+              </label>
+
+              <label className="session-field">
+                <span className="session-label">Mid Block</span>
+                <input
+                  className="session-input"
+                  value={expectedBarcodeContent.mid4}
+                  onChange={(event) => updateExpectedBarcodeContent('mid4', event.target.value)}
+                  placeholder="Expected mid block content"
+                />
+              </label>
+
+              <label className="session-field">
+                <span className="session-label">Final Barcode</span>
+                <input
+                  className="session-input"
+                  value={expectedBarcodeContent.end}
+                  onChange={(event) => updateExpectedBarcodeContent('end', event.target.value)}
+                  placeholder="Expected final barcode content"
+                />
+              </label>
+            </div>
+
+            <p className="muted">
+              Active expected content: {expectedBarcodeContentForCurrentStep || 'Not set for this step'}
+            </p>
+          </div>
+
+          <div className="runner-progress-panel">
             <h3>Scanner Capture</h3>
             <p className="muted">
               Hidden scanner input is active globally. Complete scans with Enter, Tab, or newline.
@@ -605,41 +755,6 @@ export function WorkflowRunnerPage() {
               </p>
             ) : null}
           </div>
-
-          <form className="runner-scan-form" onSubmit={handleManualSubmit}>
-            <label className="session-field">
-              <span className="session-label">Manual Input (Fallback)</span>
-              <input
-                className="session-input"
-                data-scanner-fallback="true"
-                value={manualInput}
-                onChange={(event) => setManualInput(event.target.value)}
-                placeholder="Type barcode and press Record"
-                disabled={isPaused || isCompleted || isSaving}
-              />
-            </label>
-
-            <label className="session-field">
-              <span className="session-label">Manual Override</span>
-              <select
-                className="session-input"
-                value={scanMode}
-                onChange={(event) => setScanMode(event.target.value as ScanInputMode)}
-                disabled={isPaused || isCompleted || isSaving}
-              >
-                <option value="auto">Auto detect</option>
-                <option value="parcel">parcel</option>
-                <option value="pallet">pallet</option>
-                <option value="ceiling">ceiling</option>
-                <option value="start">start</option>
-                <option value="unknown">unknown</option>
-              </select>
-            </label>
-
-            <button type="submit" className="btn-primary" disabled={isPaused || isCompleted || isSaving}>
-              Record Manual Scan
-            </button>
-          </form>
 
           <div className="runner-progress-panel">
             <h3>Block Progress & Timers</h3>

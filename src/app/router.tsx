@@ -1,6 +1,5 @@
 import { createHashRouter } from 'react-router-dom';
 import { AppLayout } from './AppLayout';
-import { CapturePage } from '../features/captures/pages/CapturePage';
 import { HistoryPage } from '../features/history/pages/HistoryPage';
 import { NewTestSessionPage } from '../features/sessions/pages/NewTestSessionPage';
 import { SessionDetailPage } from '../features/sessions/pages/SessionDetailPage';
@@ -15,10 +14,6 @@ export const appRouter = createHashRouter([
       {
         index: true,
         element: <WorkflowRunnerPage />,
-      },
-      {
-        path: 'capture',
-        element: <CapturePage />,
       },
       {
         path: 'history',

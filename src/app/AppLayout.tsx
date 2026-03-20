@@ -4,7 +4,6 @@ const navItems = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/sessions/new', label: 'New Session' },
   { to: '/runner', label: 'Runner' },
-  { to: '/capture', label: 'Legacy Capture' },
   { to: '/history', label: 'History' },
 ];
 
