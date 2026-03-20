@@ -473,3 +473,7 @@ textarea:focus-visible {
   color: #fca5a5;
   font-weight: 600;
 }
+
+.block-row-active {
+  background: #1e3a5f;
+}
