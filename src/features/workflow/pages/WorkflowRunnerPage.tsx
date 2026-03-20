@@ -46,9 +46,9 @@ const INITIAL_BARCODE_CONFIGURATION: BarcodeConfiguration = {
   startBarcode: 'START',
   finalBarcode: 'FINAL',
   palletBarcode: 'PALLET',
-  palletCeilingBarcode: 'PALLET-CEILING',
-  parcelBarcodes: ['PARCEL-1', 'PARCEL-2', 'PARCEL-3', 'PARCEL-4'],
-  ceilingBarcodes: ['CEILING-1', 'CEILING-2', 'CEILING-3', 'CEILING-4'],
+  palletCeilingBarcode: 'PALLETCEILING',
+  parcelBarcodes: ['PARCEL1', 'PARCEL2', 'PARCEL3', 'PARCEL4'],
+  ceilingBarcodes: ['CEILING1', 'CEILING2', 'CEILING3', 'CEILING4'],
 };
 
 function normalizeBarcodeContent(input: string) {
@@ -184,14 +184,11 @@ function formatDuration(durationMs: number) {
 
 function formatDateTimeWithMilliseconds(timestamp: string) {
   const date = new Date(timestamp);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   const seconds = String(date.getSeconds()).padStart(2, '0');
   const milliseconds = String(date.getMilliseconds()).padStart(3, '0');
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+  return `${hours}:${minutes}:${seconds}.${milliseconds}`;
 }
 
 function getStepProgress(eventLog: ScanEvent[], totalSteps: number) {
@@ -1124,7 +1121,9 @@ export function WorkflowRunnerPage() {
                       <td>{String(event.metadata?.workflowBlock ?? 'n/a')}</td>
                       <td>{String(event.metadata?.expectedBarcodeContent ?? 'n/a')}</td>
                       <td>{event.barcode?.normalizedValue ?? 'n/a'}</td>
-                      <td>{event.isSuccessful === false ? 'Mismatch' : 'Accepted'}</td>
+                      <td className={event.isSuccessful === false ? 'log-result-mismatch' : 'log-result-accepted'}>
+                        {event.isSuccessful === false ? 'Mismatch' : 'Accepted'}
+                      </td>
                     </tr>
                   ))}
               </tbody>
