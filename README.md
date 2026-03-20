@@ -85,7 +85,7 @@ Build now also prepares GitHub Pages artifacts:
 
 Repository target:
 
-- `https://github.com/workaroundgmbh/e2e_testing_scan_performance`
+- `https://github.com/supisimi/e2e-scan-perfomance-tool`
 
 One-time GitHub setup:
 
