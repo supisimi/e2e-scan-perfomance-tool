@@ -1,4 +1,4 @@
-import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSessionPersistence, useSessions } from '../../../data';
 import { EmptyState, ErrorState } from '../../../shared/components';
@@ -240,7 +240,7 @@ function formatDateTimeWithMilliseconds(timestamp: string) {
   return `${hours}:${minutes}:${seconds}.${milliseconds}`;
 }
 
-function getStepProgress(eventLog: ScanEvent[], totalSteps: number) {
+function getStepProgress(eventLog: ScanEvent[]) {
   const accepted = eventLog.filter(
     (event) =>
       event.type === 'scan-received' &&
@@ -248,7 +248,7 @@ function getStepProgress(eventLog: ScanEvent[], totalSteps: number) {
       event.metadata?.matchedExpectation === true
   );
 
-  return Math.min(accepted.length, totalSteps);
+  return Math.max(0, accepted.length);
 }
 
 function getBlockProgressCounters(stepIndex: number, workflowSteps: WorkflowStep[]) {
@@ -430,6 +430,7 @@ export function WorkflowRunnerPage() {
   const [lastCapturedBarcode, setLastCapturedBarcode] = useState('');
   const [lastCapturedAtMs, setLastCapturedAtMs] = useState<number>();
   const [validationMessage, setValidationMessage] = useState('');
+  const [expandedCycleIndex, setExpandedCycleIndex] = useState<number | null>(null);
   const [isBarcodeConfigOpen, setIsBarcodeConfigOpen] = useState(false);
   const [barcodeConfiguration, setBarcodeConfiguration] = useState<BarcodeConfiguration>(
     INITIAL_BARCODE_CONFIGURATION
@@ -440,6 +441,7 @@ export function WorkflowRunnerPage() {
   const [pausedAccumulatedMs, setPausedAccumulatedMs] = useState<number>(0);
   const [pauseStartedAtMs, setPauseStartedAtMs] = useState<number>();
   const [clockTick, setClockTick] = useState<number>(Date.now());
+  const savedCompletedCycleCountRef = useRef(0);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -503,9 +505,14 @@ export function WorkflowRunnerPage() {
       const loaded = await loadSession(selectedSessionId);
       setActiveSession(loaded);
       setStatusMessage('');
+      setExpandedCycleIndex(null);
 
       if (loaded) {
         setSessionStartedAtMs(new Date(loaded.startedAt).getTime());
+        const acceptedCount = getStepProgress(loaded.eventLog);
+        savedCompletedCycleCountRef.current = Math.floor(acceptedCount / workflowSteps.length);
+      } else {
+        savedCompletedCycleCountRef.current = 0;
       }
 
       setIsSessionRunning(false);
@@ -515,18 +522,31 @@ export function WorkflowRunnerPage() {
     }
 
     void loadSelectedSession();
-  }, [selectedSessionId, loadSession]);
+  }, [selectedSessionId, loadSession, workflowSteps.length]);
 
-  const workflowStepIndex = useMemo(() => {
-    if (!activeSession) {
-      return 0;
-    }
+  const acceptedWorkflowEvents = useMemo(
+    () =>
+      (activeSession?.eventLog ?? [])
+        .filter(
+          (event) =>
+            event.type === 'scan-received' &&
+            event.metadata?.workflowId === 'multi-range-v1' &&
+            event.metadata?.matchedExpectation === true
+        )
+        .sort((left, right) => left.occurredAtMs - right.occurredAtMs),
+    [activeSession?.eventLog]
+  );
 
-    return getStepProgress(activeSession.eventLog, workflowSteps.length);
-  }, [activeSession, workflowSteps.length]);
+  const totalAcceptedCount = acceptedWorkflowEvents.length;
+  const completedCycleCount = Math.floor(totalAcceptedCount / workflowSteps.length);
+  const currentCycleAcceptedCount = totalAcceptedCount % workflowSteps.length;
+  const currentCycleAcceptedEvents = useMemo(
+    () => acceptedWorkflowEvents.slice(completedCycleCount * workflowSteps.length),
+    [acceptedWorkflowEvents, completedCycleCount, workflowSteps.length]
+  );
 
+  const workflowStepIndex = currentCycleAcceptedCount;
   const currentStep = workflowSteps[workflowStepIndex];
-  const isCompleted = workflowStepIndex >= workflowSteps.length;
 
   const elapsedSessionMs = useMemo(() => {
     if (!isSessionRunning) {
@@ -548,22 +568,13 @@ export function WorkflowRunnerPage() {
   );
 
   const blockTimers = useMemo(
-    () => getBlockTimers(activeSession?.eventLog ?? [], clockTick, workflowSteps),
-    [activeSession?.eventLog, clockTick, workflowSteps]
+    () => getBlockTimers(currentCycleAcceptedEvents, clockTick, workflowSteps),
+    [clockTick, currentCycleAcceptedEvents, workflowSteps]
   );
 
   const fullCycleDurationMs = useMemo(() => {
-    const acceptedEvents = (activeSession?.eventLog ?? [])
-      .filter(
-        (event) =>
-          event.type === 'scan-received' &&
-          event.metadata?.workflowId === 'multi-range-v1' &&
-          event.metadata?.matchedExpectation === true
-      )
-      .sort((left, right) => left.occurredAtMs - right.occurredAtMs);
-
-    const startEvent = acceptedEvents.find((event) => event.metadata?.workflowBlock === 'start');
-    const finalEvent = acceptedEvents
+    const startEvent = currentCycleAcceptedEvents.find((event) => event.metadata?.workflowBlock === 'start');
+    const finalEvent = currentCycleAcceptedEvents
       .slice()
       .reverse()
       .find((event) => event.metadata?.workflowBlock === 'end');
@@ -577,7 +588,79 @@ export function WorkflowRunnerPage() {
     }
 
     return Math.max(0, finalEvent.occurredAtMs - startEvent.occurredAtMs);
-  }, [activeSession?.eventLog, clockTick]);
+  }, [clockTick, currentCycleAcceptedEvents]);
+
+  const completedCycleSummaries = useMemo(() => {
+    const summaries: Array<{
+      cycleNumber: number;
+      completedAt: string;
+      fullCycleDurationMs: number;
+      blockDurations: Record<BlockKey, number>;
+    }> = [];
+
+    for (let cycleIndex = 0; cycleIndex < completedCycleCount; cycleIndex += 1) {
+      const startIndex = cycleIndex * workflowSteps.length;
+      const cycleEvents = acceptedWorkflowEvents.slice(startIndex, startIndex + workflowSteps.length);
+      const firstEvent = cycleEvents[0];
+      const lastEvent = cycleEvents[cycleEvents.length - 1];
+
+      if (!firstEvent || !lastEvent) {
+        continue;
+      }
+
+      summaries.push({
+        cycleNumber: cycleIndex + 1,
+        completedAt: lastEvent.occurredAt,
+        fullCycleDurationMs: Math.max(0, lastEvent.occurredAtMs - firstEvent.occurredAtMs),
+        blockDurations: getBlockTimers(cycleEvents, lastEvent.occurredAtMs, workflowSteps),
+      });
+    }
+
+    return summaries;
+  }, [acceptedWorkflowEvents, completedCycleCount, workflowSteps]);
+
+  const blockAverages = useMemo(() => {
+    const stats: Record<BlockKey, { count: number; averageMs: number }> = {
+      start: { count: 0, averageMs: 0 },
+      travelStartToShort: { count: 0, averageMs: 0 },
+      short4: { count: 0, averageMs: 0 },
+      travelShortToMixed: { count: 0, averageMs: 0 },
+      mixed: { count: 0, averageMs: 0 },
+      travelMixedToLong: { count: 0, averageMs: 0 },
+      long4: { count: 0, averageMs: 0 },
+      travelLongToMid: { count: 0, averageMs: 0 },
+      mid4: { count: 0, averageMs: 0 },
+      travelMidToEnd: { count: 0, averageMs: 0 },
+      end: { count: 0, averageMs: 0 },
+    };
+
+    for (const block of BLOCK_ORDER) {
+      const durations = completedCycleSummaries
+        .map((cycle) => cycle.blockDurations[block])
+        .filter((duration) => duration > 0);
+
+      if (durations.length === 0) {
+        continue;
+      }
+
+      const total = durations.reduce((sum, duration) => sum + duration, 0);
+      stats[block] = {
+        count: durations.length,
+        averageMs: Math.round(total / durations.length),
+      };
+    }
+
+    return stats;
+  }, [completedCycleSummaries]);
+
+  const fullCycleAverageMs = useMemo(() => {
+    if (completedCycleSummaries.length === 0) {
+      return 0;
+    }
+
+    const total = completedCycleSummaries.reduce((sum, cycle) => sum + cycle.fullCycleDurationMs, 0);
+    return Math.round(total / completedCycleSummaries.length);
+  }, [completedCycleSummaries]);
 
   const expectedBarcodeContentForCurrentStep = currentStep ? currentStep.expectedBarcodeContent : '';
 
@@ -598,7 +681,7 @@ export function WorkflowRunnerPage() {
     source: 'scanner',
     capturedAtMs: number
   ) {
-    if (!activeSession || !currentStep || !isSessionRunning || isPaused || isSaving || isCompleted) {
+    if (!activeSession || !currentStep || !isSessionRunning || isPaused || isSaving) {
       return;
     }
 
@@ -618,7 +701,7 @@ export function WorkflowRunnerPage() {
     const inferredType = autoClassification.type;
     const classifiedType = finalClassification.type;
     const normalizedActualBarcode = normalizeBarcodeContent(finalClassification.normalizedValue);
-    const matchedEventsForBlock = activeSession.eventLog.filter(
+    const matchedEventsForBlock = currentCycleAcceptedEvents.filter(
       (event) =>
         event.type === 'scan-received' &&
         event.metadata?.workflowId === 'multi-range-v1' &&
@@ -794,7 +877,7 @@ export function WorkflowRunnerPage() {
   }
 
   async function processScannerKey(key: string) {
-    if (!isSessionRunning || isPaused || isCompleted || isSaving) {
+    if (!isSessionRunning || isPaused || isSaving) {
       return;
     }
 
@@ -861,7 +944,7 @@ export function WorkflowRunnerPage() {
         return;
       }
 
-      if (!isSessionRunning || isPaused || isCompleted || isSaving) {
+      if (!isSessionRunning || isPaused || isSaving) {
         return;
       }
 
@@ -874,7 +957,7 @@ export function WorkflowRunnerPage() {
     return () => {
       window.removeEventListener('keydown', onWindowKeyDown);
     };
-  }, [isCompleted, isPaused, isSaving, isSessionRunning, processScannerKey]);
+  }, [isPaused, isSaving, isSessionRunning, processScannerKey]);
 
   useEffect(() => {
     return () => {
@@ -954,7 +1037,7 @@ export function WorkflowRunnerPage() {
   }
 
   async function handleStartSession() {
-    if (!activeSession || isSaving || isCompleted || isSessionRunning) {
+    if (!activeSession || isSaving || isSessionRunning) {
       return;
     }
 
@@ -980,23 +1063,42 @@ export function WorkflowRunnerPage() {
     }
   }
 
-  const markCompletedIfNeeded = useCallback(async () => {
-    if (!activeSession || !isCompleted || activeSession.endedAt) {
-      return;
+  useEffect(() => {
+    async function persistCompletedCycleNote() {
+      if (!activeSession) {
+        return;
+      }
+
+      if (completedCycleCount <= savedCompletedCycleCountRef.current) {
+        return;
+      }
+
+      const latestCycle = completedCycleSummaries[completedCycleCount - 1];
+      if (!latestCycle) {
+        return;
+      }
+
+      savedCompletedCycleCountRef.current = completedCycleCount;
+      setStatusMessage(`Cycle ${latestCycle.cycleNumber} completed in ${formatDuration(latestCycle.fullCycleDurationMs)}.`);
+
+      const saved = await appendEvent(activeSession.id, {
+        type: 'session-note',
+        note: `Cycle ${latestCycle.cycleNumber} completed`,
+        metadata: {
+          workflowId: 'multi-range-v1',
+          action: 'cycle-complete',
+          cycleNumber: latestCycle.cycleNumber,
+          cycleDurationMs: latestCycle.fullCycleDurationMs,
+        },
+      });
+
+      if (saved) {
+        setActiveSession(saved);
+      }
     }
 
-    const updated = await updateExistingSession({
-      ...activeSession,
-      endedAt: new Date().toISOString(),
-    });
-
-    setActiveSession(updated);
-    setStatusMessage('Workflow completed. Final start barcode received.');
-  }, [activeSession, isCompleted, updateExistingSession]);
-
-  useEffect(() => {
-    void markCompletedIfNeeded();
-  }, [markCompletedIfNeeded]);
+    void persistCompletedCycleNote();
+  }, [activeSession, appendEvent, completedCycleCount, completedCycleSummaries]);
 
   function handleSessionChange(sessionId: string) {
     setSelectedSessionId(sessionId);
@@ -1049,11 +1151,11 @@ export function WorkflowRunnerPage() {
           <div className="runner-status-grid">
             <div className="runner-card">
               <p className="runner-card-title">Current Block</p>
-              <p className="runner-card-value">{isCompleted ? 'Completed' : BLOCK_LABELS[currentStep.block]}</p>
+              <p className="runner-card-value">{BLOCK_LABELS[activeBlock]}</p>
             </div>
             <div className="runner-card">
               <p className="runner-card-title">Expected Next Scan</p>
-              <p className="runner-card-value">{isCompleted ? 'None' : currentStep.expectedLabel}</p>
+              <p className="runner-card-value">{currentStep.expectedLabel}</p>
             </div>
             <div className={isSessionRunning && !isPaused ? 'runner-card runner-card-active' : 'runner-card'}>
               <p className="runner-card-title">Session Timer</p>
@@ -1072,7 +1174,7 @@ export function WorkflowRunnerPage() {
               type="button"
               className="btn-primary"
               onClick={() => void handleStartSession()}
-              disabled={isSessionRunning || isCompleted || isSaving}
+              disabled={isSessionRunning || isSaving}
             >
               Start Session
             </button>
@@ -1246,62 +1348,91 @@ export function WorkflowRunnerPage() {
           </div>
 
           <div className="runner-progress-panel">
-            <h3>Live Metrics</h3>
-            <table className="history-table" aria-label="Live workflow metrics">
-              <caption className="visually-hidden">Live workflow metrics by block and full cycle</caption>
+            <h3>Completed Cycles</h3>
+            {completedCycleSummaries.length === 0 ? (
+              <p className="muted">No completed full cycles yet.</p>
+            ) : (
+              <table className="history-table" aria-label="Completed cycle summaries">
+                <thead>
+                  <tr>
+                    <th>Cycle</th>
+                    <th>Completed At</th>
+                    <th>Full Cycle Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {completedCycleSummaries.map((cycle, index) => (
+                    <Fragment key={`cycle-${cycle.cycleNumber}`}>
+                      <tr>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            onClick={() =>
+                              setExpandedCycleIndex((previous) => (previous === index ? null : index))
+                            }
+                          >
+                            Cycle {cycle.cycleNumber}
+                          </button>
+                        </td>
+                        <td>{formatDateTimeWithMilliseconds(cycle.completedAt)}</td>
+                        <td>{formatDuration(cycle.fullCycleDurationMs)}</td>
+                      </tr>
+                      {expandedCycleIndex === index ? (
+                        <tr>
+                          <td colSpan={3}>
+                            <table className="history-table" aria-label={`Cycle ${cycle.cycleNumber} block timings`}>
+                              <thead>
+                                <tr>
+                                  <th>Block</th>
+                                  <th>Duration</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {BLOCK_ORDER.map((block) => (
+                                  <tr key={`${cycle.cycleNumber}-${block}`}>
+                                    <td>{BLOCK_LABELS[block]}</td>
+                                    <td>{formatDuration(cycle.blockDurations[block])}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="runner-progress-panel">
+            <h3>Session Block Averages</h3>
+            <table className="history-table" aria-label="Average block durations and counts in session">
               <thead>
                 <tr>
-                  <th>Metric</th>
-                  <th>Total</th>
-                  <th>Success</th>
-                  <th>Failed</th>
-                  <th>Avg Interval (ms)</th>
-                  <th>Duration (ms)</th>
+                  <th>Block</th>
+                  <th>Recorded Count</th>
+                  <th>Average Duration</th>
                 </tr>
               </thead>
               <tbody>
+                {BLOCK_ORDER.map((block) => (
+                  <tr key={`avg-${block}`}>
+                    <td>{BLOCK_LABELS[block]}</td>
+                    <td>{blockAverages[block].count}</td>
+                    <td>{formatDuration(blockAverages[block].averageMs)}</td>
+                  </tr>
+                ))}
                 <tr>
-                  <td>short4</td>
-                  <td>{activeSession.metrics?.byPhase.short4.totalScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.short4.successfulScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.short4.failedScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.short4.averageScanIntervalMs ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.short4.window.durationMs ?? 0}</td>
-                </tr>
-                <tr>
-                  <td>mixed</td>
-                  <td>{activeSession.metrics?.byPhase.mixed.totalScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.mixed.successfulScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.mixed.failedScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.mixed.averageScanIntervalMs ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.mixed.window.durationMs ?? 0}</td>
-                </tr>
-                <tr>
-                  <td>long4</td>
-                  <td>{activeSession.metrics?.byPhase.long4.totalScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.long4.successfulScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.long4.failedScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.long4.averageScanIntervalMs ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.long4.window.durationMs ?? 0}</td>
-                </tr>
-                <tr>
-                  <td>mid4</td>
-                  <td>{activeSession.metrics?.byPhase.mid4.totalScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.mid4.successfulScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.mid4.failedScans ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.mid4.averageScanIntervalMs ?? 0}</td>
-                  <td>{activeSession.metrics?.byPhase.mid4.window.durationMs ?? 0}</td>
-                </tr>
-                <tr>
-                  <td>fullCycle</td>
-                  <td>{activeSession.metrics?.fullCycle.totalScans ?? 0}</td>
-                  <td>{activeSession.metrics?.fullCycle.successfulScans ?? 0}</td>
-                  <td>{activeSession.metrics?.fullCycle.failedScans ?? 0}</td>
-                  <td>—</td>
-                  <td>{fullCycleDurationMs}</td>
+                  <td>Full Cycle</td>
+                  <td>{completedCycleSummaries.length}</td>
+                  <td>{formatDuration(fullCycleAverageMs)}</td>
                 </tr>
               </tbody>
             </table>
+            <p className="muted">Current in-progress full cycle: {formatDuration(fullCycleDurationMs)}</p>
           </div>
 
           <div className="runner-progress-panel">

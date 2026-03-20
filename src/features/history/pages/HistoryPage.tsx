@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useSessions } from '../../../data';
+import { deleteSession } from '../../../data/sessionRepository';
 import { EmptyState, ErrorState, LoadingState } from '../../../shared/components';
 
 function formatDuration(durationMs: number) {
@@ -23,6 +24,16 @@ function getInvalidScanCount(eventLog: Array<{ type: string; isSuccessful?: bool
 
 export function HistoryPage() {
   const { sessions, isLoading, error, refreshSessions } = useSessions();
+
+  async function handleDeleteSession(sessionId: string) {
+    const confirmed = window.confirm('Delete this session permanently?');
+    if (!confirmed) {
+      return;
+    }
+
+    await deleteSession(sessionId);
+    await refreshSessions();
+  }
 
   return (
     <section className="panel">
@@ -65,6 +76,7 @@ export function HistoryPage() {
               <th>Full Cycle</th>
               <th>Invalid Scans</th>
               <th>Open</th>
+              <th>Delete</th>
             </tr>
           </thead>
           <tbody>
@@ -80,6 +92,16 @@ export function HistoryPage() {
                   <Link to={`/sessions/${session.id}`} className="dashboard-link" aria-label={`Open session ${session.id}`}>
                     Open
                   </Link>
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    className="btn-danger"
+                    onClick={() => void handleDeleteSession(session.id)}
+                    aria-label={`Delete session ${session.id}`}
+                  >
+                    Delete
+                  </button>
                 </td>
               </tr>
             ))}
