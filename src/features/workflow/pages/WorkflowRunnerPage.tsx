@@ -194,6 +194,9 @@ export function WorkflowRunnerPage() {
   const [selectedSessionId, setSelectedSessionId] = useState(initialSessionId);
   const [activeSession, setActiveSession] = useState<TestSession>();
   const scannerInputRef = useRef<HTMLInputElement>(null);
+  const scannerFlushTimeoutRef = useRef<number>();
+  const scannerBufferRef = useRef('');
+  const scannerCharTimestampsRef = useRef<number[]>([]);
   const [scannerBuffer, setScannerBuffer] = useState('');
   const [scannerCharTimestamps, setScannerCharTimestamps] = useState<number[]>([]);
   const [statusMessage, setStatusMessage] = useState('');
@@ -217,6 +220,14 @@ export function WorkflowRunnerPage() {
 
     return () => window.clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    scannerBufferRef.current = scannerBuffer;
+  }, [scannerBuffer]);
+
+  useEffect(() => {
+    scannerCharTimestampsRef.current = scannerCharTimestamps;
+  }, [scannerCharTimestamps]);
 
   useEffect(() => {
     scannerInputRef.current?.focus();
@@ -440,6 +451,16 @@ export function WorkflowRunnerPage() {
     setScannerCharTimestamps([]);
   }
 
+  function scheduleScannerFlush() {
+    if (scannerFlushTimeoutRef.current) {
+      window.clearTimeout(scannerFlushTimeoutRef.current);
+    }
+
+    scannerFlushTimeoutRef.current = window.setTimeout(() => {
+      void completeScannerBuffer(scannerBufferRef.current, scannerCharTimestampsRef.current);
+    }, 90);
+  }
+
   async function processScannerKey(key: string) {
     if (!isSessionRunning || isPaused || isCompleted || isSaving) {
       return;
@@ -464,8 +485,17 @@ export function WorkflowRunnerPage() {
 
     if (key.length === 1) {
       const nowMs = Date.now();
-      setScannerBuffer((previous) => `${previous}${key}`);
-      setScannerCharTimestamps((previous) => [...previous, nowMs]);
+      setScannerBuffer((previous) => {
+        const next = `${previous}${key}`;
+        scannerBufferRef.current = next;
+        return next;
+      });
+      setScannerCharTimestamps((previous) => {
+        const next = [...previous, nowMs];
+        scannerCharTimestampsRef.current = next;
+        return next;
+      });
+      scheduleScannerFlush();
     }
   }
 
@@ -513,6 +543,14 @@ export function WorkflowRunnerPage() {
       window.removeEventListener('keydown', onWindowKeyDown);
     };
   }, [isCompleted, isPaused, isSaving, isSessionRunning, processScannerKey]);
+
+  useEffect(() => {
+    return () => {
+      if (scannerFlushTimeoutRef.current) {
+        window.clearTimeout(scannerFlushTimeoutRef.current);
+      }
+    };
+  }, []);
 
   async function handlePauseResume() {
     if (!activeSession || !isSessionRunning) {
@@ -745,6 +783,7 @@ export function WorkflowRunnerPage() {
                   value={expectedBarcodeContent.start}
                   onChange={(event) => updateExpectedBarcodeContent('start', event.target.value)}
                   placeholder="Expected start barcode content"
+                  disabled={isSessionRunning}
                 />
               </label>
 
@@ -756,6 +795,7 @@ export function WorkflowRunnerPage() {
                   value={expectedBarcodeContent.short4}
                   onChange={(event) => updateExpectedBarcodeContent('short4', event.target.value)}
                   placeholder="Expected short block content"
+                  disabled={isSessionRunning}
                 />
               </label>
 
@@ -767,6 +807,7 @@ export function WorkflowRunnerPage() {
                   value={expectedBarcodeContent.mixed}
                   onChange={(event) => updateExpectedBarcodeContent('mixed', event.target.value)}
                   placeholder="Expected mixed block content"
+                  disabled={isSessionRunning}
                 />
               </label>
 
@@ -778,6 +819,7 @@ export function WorkflowRunnerPage() {
                   value={expectedBarcodeContent.long4}
                   onChange={(event) => updateExpectedBarcodeContent('long4', event.target.value)}
                   placeholder="Expected long block content"
+                  disabled={isSessionRunning}
                 />
               </label>
 
@@ -789,6 +831,7 @@ export function WorkflowRunnerPage() {
                   value={expectedBarcodeContent.mid4}
                   onChange={(event) => updateExpectedBarcodeContent('mid4', event.target.value)}
                   placeholder="Expected mid block content"
+                  disabled={isSessionRunning}
                 />
               </label>
 
@@ -800,6 +843,7 @@ export function WorkflowRunnerPage() {
                   value={expectedBarcodeContent.end}
                   onChange={(event) => updateExpectedBarcodeContent('end', event.target.value)}
                   placeholder="Expected final barcode content"
+                  disabled={isSessionRunning}
                 />
               </label>
             </div>
