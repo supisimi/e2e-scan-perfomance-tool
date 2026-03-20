@@ -1111,7 +1111,7 @@ export function WorkflowRunnerPage() {
 
   return (
     <section className="panel runner-panel">
-      <h2>Guided Workflow Runner</h2>
+      <h2>Record Session</h2>
       <p className="muted">Workflow: multi-range-v1</p>
 
       <div className="runner-toolbar">
@@ -1137,7 +1137,7 @@ export function WorkflowRunnerPage() {
         </button>
       </div>
 
-      {error ? <ErrorState title="Runner error" description={error} /> : null}
+      {error ? <ErrorState title="Record Session error" description={error} /> : null}
 
       {!activeSession ? (
         <EmptyState

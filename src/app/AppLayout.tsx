@@ -3,7 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 const navItems = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/sessions/new', label: 'New Session' },
-  { to: '/runner', label: 'Runner' },
+  { to: '/runner', label: 'Record Session' },
   { to: '/history', label: 'History' },
 ];
 
